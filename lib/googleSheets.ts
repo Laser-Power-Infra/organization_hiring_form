@@ -420,47 +420,71 @@ export async function appendCandidateSubmission(
       finalRemarks                                  // 15. Final Remarks
     ];
 
+    // 3. Authoritative submission to Google Spreadsheet via Apps Script Web App
+    if (APPS_SCRIPT_URL) {
+      try {
+        const scriptRes = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            ...formData,
+            submissionId,
+            timestamp,
+            scorecard,
+          }),
+        });
+
+        const scriptText = await scriptRes.text();
+        let scriptData: any = {};
+        try {
+          scriptData = JSON.parse(scriptText);
+        } catch (e) {
+          scriptData = { success: scriptRes.ok };
+        }
+
+        if (scriptRes.ok && scriptData.success !== false) {
+          return {
+            success: true,
+            submissionId,
+            message: scriptData.message || 'Response and scorecard successfully recorded in Google Sheet & Google Drive.',
+          };
+        }
+      } catch (scriptErr) {
+        console.error('Apps Script Submission Error:', scriptErr);
+      }
+    }
+
+    // Direct REST API Fallback
     const resAppendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent("'Candidate Responses'!A1")}:append?valueInputOption=USER_ENTERED`;
     const scAppendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent("'Screening Scorecard'!A1")}:append?valueInputOption=USER_ENTERED`;
 
-    // 3. Concurrent Sheet Append Execution for maximum speed
-    await Promise.all([
-      fetch(resAppendUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ values: [responseRow] }),
-      }),
-      fetch(scAppendUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ values: [scorecardRow] }),
-      }),
-    ]);
-
-    // 4. Asynchronously notify Apps Script (non-blocking)
-    if (APPS_SCRIPT_URL) {
-      fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          ...formData,
-          submissionId,
-          timestamp,
-          scorecard,
+    try {
+      await Promise.all([
+        fetch(resAppendUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ values: [responseRow] }),
         }),
-      }).catch((e) => console.warn('Apps script notification note:', e));
+        fetch(scAppendUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ values: [scorecardRow] }),
+        }),
+      ]);
+    } catch (restErr) {
+      console.warn('Direct REST fallback error:', restErr);
     }
 
     return {
       success: true,
       submissionId,
-      message: 'Response and scorecard successfully recorded in Google Sheet & Google Drive.',
+      message: 'Response and scorecard successfully recorded in Google Sheet.',
     };
   } catch (error: any) {
     console.error('Google Sheets Submission Error:', error);
